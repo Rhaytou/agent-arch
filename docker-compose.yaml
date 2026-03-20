@@ -1,0 +1,189 @@
+services:
+
+  # ============================================================
+  # DATABASE LAYER
+  # ============================================================
+
+  pgvector_service:
+    container_name: pgvector_container
+    build: ./dockerfile/databases/pgvector
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./dockerfile/databases/pgvector/init-scripts:/docker-entrypoint-initdb.d
+      - ./dockerfile/databases/pgvector/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis_service:
+    container_name: redis_container
+    build: ./dockerfile/databases/redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+      - ./dockerfile/databases/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+  # ============================================================
+  # INFERENCE LAYER
+  # ============================================================
+
+  ollama_service:
+    container_name: ollama_container
+    build: ./dockerfile/ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_MODELS: ${OLLAMA_MODELS}
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - app_net
+    # Uncomment for NVIDIA GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10m
+
+  litellm_service:
+    container_name: litellm_container
+    build: ./dockerfile/litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgvector_container:5432/${POSTGRES_DB}
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./dockerfile/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - app_net
+    depends_on:
+      pgvector_service:
+        condition: service_healthy
+      redis_service:
+        condition: service_healthy
+      ollama_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120m
+
+
+  # ============================================================
+  # AGENT LAYER
+  # ============================================================
+
+  n8n_service:
+    container_name: n8n_container
+    build: ./dockerfile/n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Database — n8n uses its own schema inside the same postgres
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: pgvector_container
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_SCHEMA: n8n
+      # n8n core
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      # Timezone
+      GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
+      TZ: ${TIMEZONE:-UTC}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - app_net
+    depends_on:
+      pgvector_service:
+        condition: service_healthy
+      redis_service:
+        condition: service_healthy
+      #litellm_service:
+      #  condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+
+# ============================================================
+# NETWORKS
+# ============================================================
+
+networks:
+  app_net:
+    driver: bridge
+
+
+# ============================================================
+# VOLUMES
+# ============================================================
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  n8n_data:
+
+
+
+
+
+
+
