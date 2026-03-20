@@ -1,0 +1,119 @@
+# ============================================================
+# LITELLM PROXY CONFIGURATION
+# Docs: https://docs.litellm.ai/docs/proxy/configs
+# ============================================================
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY        # master API key for the proxy
+
+
+# ============================================================
+# MODEL LIST — all models available to agents via LiteLLM
+# Agents call LiteLLM using the "model_name" field
+# LiteLLM routes to the correct provider via "litellm_params"
+# ============================================================
+
+model_list:
+
+  # ----------------------------------------------------------
+  # OLLAMA — local models (no API key needed)
+  # ----------------------------------------------------------
+
+  - model_name: ollama/llama3.2:1b
+    litellm_params:
+      model: ollama/llama3.2:1b
+      api_base: http://ollama_container:11434
+
+  - model_name: ollama/llama3.2:3b
+    litellm_params:
+      model: ollama/llama3.2:3b
+      api_base: http://ollama_container:11434
+
+  - model_name: ollama/phi3:mini
+    litellm_params:
+      model: ollama/phi3:mini
+      api_base: http://ollama_container:11434
+
+  - model_name: ollama/gemma2:2b
+    litellm_params:
+      model: ollama/gemma2:2b
+      api_base: http://ollama_container:11434
+
+  - model_name: ollama/qwen2.5:3b
+    litellm_params:
+      model: ollama/qwen2.5:3b
+      api_base: http://ollama_container:11434
+
+
+  # ----------------------------------------------------------
+  # OPENAI — cloud provider
+  # ----------------------------------------------------------
+
+  - model_name: openai/gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+
+  # ----------------------------------------------------------
+  # ANTHROPIC — cloud provider
+  # ----------------------------------------------------------
+
+  - model_name: anthropic/claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic/claude-3-5-haiku
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+
+  # ----------------------------------------------------------
+  # GROQ — fast cloud inference
+  # ----------------------------------------------------------
+
+  - model_name: groq/llama3.3-70b
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: groq/llama3.1-8b
+    litellm_params:
+      model: groq/llama-3.1-8b-instant
+      api_key: os.environ/GROQ_API_KEY
+
+
+# ============================================================
+# ROUTER SETTINGS — fallback and retry logic
+# ============================================================
+
+router_settings:
+  routing_strategy: least-busy            # route to least busy model
+  num_retries: 3                          # retry failed requests
+  timeout: 60                             # request timeout in seconds
+  fallbacks:
+    # if an openai model fails, fall back to ollama
+    - openai/gpt-4o-mini: ["ollama/llama3.2:3b"]
+    - groq/llama3.1-8b:   ["ollama/llama3.2:3b"]
+
+
+# ============================================================
+# LITELLM SETTINGS
+# ============================================================
+
+litellm_settings:
+  success_callback: []                    # add "langsmith" here later if needed
+  failure_callback: []
+  request_timeout: 60
+  drop_params: true                       # drop unsupported params instead of erroring
+  set_verbose: false
+
+
+
